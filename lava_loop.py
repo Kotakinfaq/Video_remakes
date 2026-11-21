@@ -22,12 +22,13 @@ from numba import njit, prange
 WARP_Q = 0.6    # strength of second warp stage
 WARP_B = 0.35   # how much the warp wobbles the clumps
 PERSP = 0.30    # 0 = flat top-down view, higher = more oblique
-PERSP_Y = 2.6   # vertical world extent factor (keeps clumps round)
-CLUMP = 1.2     # clump frequency (higher = smaller clumps)
+PERSP_Y = 2.6 
+WAVE_STRETCH = 0.55  # <1 stretches waves horizontally  # vertical world extent factor (keeps clumps round)
+CLUMP = 1.7     # clump frequency (higher = smaller clumps)
 BILLOW = 0.40
 FOLD_F = 2.0    # size of the cauliflower folds relative to clumps   # cauliflower folds on the clumps
 FOAM = 0.20     # fine crinkly detail on the clump tops
-FUR_ANG = 0.62  # hair angle on screen (radians, rising to the right)
+FUR_ANG = 0.30  # hair angle on screen (radians, rising to the right)
 FUR_LEN = 0.010 # how far (screen heights) clump edges smear into hairs
 HAIR_U = 18.0   # hair frequency along the hairs (lower = longer hairs)
 HAIR_V = 260.0   # hair frequency across the hairs (higher = thinner)
@@ -39,14 +40,23 @@ SH_STEPS = 14   # cast-shadow march length
 SH_SLOPE = 0.012
 SH_SOFT = 12.0
 SH_MIN = 0.25
-EDGE = 0.8      # crispness of cloud-top edges
-H_W = 0.62      # weight of clump height in colour
-D_W = 0.58      # weight of lighting in colour
+EDGE = 1.0      # crispness of cloud-top edges
+H_W = 0.80      # weight of clump height in colour
+D_W = 0.70      # weight of lighting in colour
 S_W = 0.14      # weight of thin hair lines in colour
-BIAS = -0.17
-LIC_LEN = 90.0  # fur streak length in pixels at 4K
-LIC_N = 12      # samples along each streak
-LIC_MIX = 0.85  # how much of the surface is combed into streaks
+BIAS = -0.11
+HAIR_SP = 6.0   # spacing of hair roots in pixels at 4K
+HAIR_LAYERS = 2 # hairs per root cell
+HAIR_LEN = 40.0 # hair length in pixels at 4K (near the bottom of frame)
+HAIR_BEND = 0.9 # how much the hair direction wanders across the frame
+HAIR_JIT = 0.45 # per-hair direction randomness
+HAIR_CURL = 0.5 # per-hair curvature
+HAIR_VAR = 0.12 # per-hair brightness randomness
+HAIR_ROOT = 0.30 # root brightness relative to tip
+HAIR_TIP = 0.10 # extra glow at the tip
+HAIR_ALPHA = 0.85
+HAIR_W = 2.5    # hair thickness in pixels at 4K
+BG_DIM = 0.65   # surface brightness showing between hairs
 
 # ---------------------------------------------------------------- noise ----
 
@@ -181,7 +191,7 @@ def _bilerp(f, c, fx, fy, w, h):
 def _world(px, py, aspect, scale):
     """Screen -> world coords for an obliquely viewed surface."""
     z = 1.0 / (1.0 - PERSP * (1.0 - py))
-    return (px - 0.5 * aspect) * z * scale, -z * scale * PERSP_Y
+    return (px - 0.5 * aspect) * z * scale * WAVE_STRETCH, -z * scale * PERSP_Y
 
 
 @njit(parallel=True, cache=True)
@@ -291,71 +301,107 @@ def shade(tone, hgt, stk, smo, W, H, lo, hi):
             tone[j, i] = H_W * hv + D_W * lit + BIAS
 
 
+@njit(inline="always", cache=True)
+def _rand(a, b, c):
+    """Deterministic hash -> [0, 1)."""
+    h = (a * 73856093 ^ b * 19349663 ^ c * 83492791) & 0xFFFFFFFF
+    h = ((h ^ (h >> 15)) * 2246822519) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 3266489917) & 0xFFFFFFFF
+    h = h ^ (h >> 16)
+    return (h & 0xFFFFFF) / 16777216.0
+
+
+@njit(inline="always", cache=True)
+def _splat(img, zb, x, y, col, a, depth, W, H):
+    """Bilinear (anti-aliased) blend of one hair sample, nearer hairs win."""
+    xi = int(math.floor(x))
+    yi = int(math.floor(y))
+    fx = x - xi
+    fy = y - yi
+    for dy in range(2):
+        yy = yi + dy
+        if yy < 0 or yy >= H:
+            continue
+        wy = fy if dy == 1 else 1.0 - fy
+        for dx in range(2):
+            xx = xi + dx
+            if xx < 0 or xx >= W:
+                continue
+            if depth < zb[yy, xx] - 6.0:
+                continue
+            w = (fx if dx == 1 else 1.0 - fx) * wy * a
+            img[yy, xx] = img[yy, xx] * (1.0 - w) + col * w
+            if depth > zb[yy, xx]:
+                zb[yy, xx] = depth
+
+
 @njit(parallel=True, cache=True)
-def fur_pass(rgb, tone, stk, W, H, lut):
-    """Streak-blur the tone along the hair direction (line-integral
-    convolution). Each fibre gets its own length and brightness from the
-    thin hair noise, which turns the surface into combed fur."""
-    n = lut.shape[0]
+def draw_hairs(img, zb, tone, W, H, aspect, phase, scale):
+    """Grow individual hairs from a jittered grid of roots.
+
+    Each hair takes its brightness from the lit surface at its root, is dark
+    at the root and bright at the tip, and leans up-right with a direction
+    that wanders smoothly across the frame and sways over the loop.
+    """
     px_scale = W / 3840.0
-    ca = math.cos(FUR_ANG)
-    sa = math.sin(FUR_ANG)
-    # hairs grow toward the upper right, so look back down-left for their roots
-    bx = -ca
-    by = sa
-    L = LIC_LEN * px_scale
+    sp = HAIR_SP * px_scale
+    nx = int(W / sp) + 2
+    ny = int(H / sp) + int(HAIR_LEN * px_scale / sp) + 2
+    for gy in prange(ny):
+        for gx in range(nx):
+            for layer in range(HAIR_LAYERS):
+                r1 = _rand(gx, gy, layer * 7 + 1)
+                r2 = _rand(gx, gy, layer * 7 + 2)
+                r3 = _rand(gx, gy, layer * 7 + 3)
+                r4 = _rand(gx, gy, layer * 7 + 4)
+                r5 = _rand(gx, gy, layer * 7 + 5)
+                rx = (gx + r1 - 0.5) * sp
+                ry = (gy + r2 - 0.5) * sp
+                if rx < 0 or rx >= W or ry < 0 or ry >= H:
+                    continue
+                pyn = ry / H
+                persp = 1.0 - PERSP * (1.0 - pyn)      # nearer = bigger
+                # direction field: smooth wander + per-hair jitter + sway
+                wx = rx / H * 3.0
+                wy = pyn * 3.0
+                ang = (FUR_ANG + HAIR_BEND * fbm(wx, wy, phase, 2, 3, 401, 0.5)
+                       + HAIR_JIT * (r3 - 0.5))
+                curl = HAIR_CURL * (r4 - 0.5)
+                ln = HAIR_LEN * px_scale * persp * (0.45 + 0.9 * r5)
+                hw = HAIR_W * px_scale * persp
+                base = tone[int(ry), int(rx)]
+                bright = base + HAIR_VAR * (r3 - 0.5)
+                steps = int(ln * 1.5) + 2
+                ca = math.cos(ang)
+                sa = math.sin(ang)
+                x = rx
+                y = ry
+                stepl = ln / steps
+                for k in range(steps):
+                    t = k / (steps - 1)
+                    # dark root, glowing tip
+                    col = bright * (HAIR_ROOT + (1.0 - HAIR_ROOT) * t) + HAIR_TIP * t * t * t
+                    a = HAIR_ALPHA * (1.0 - 0.5 * t)
+                    # thickness: a few parallel samples across the hair
+                    wid = hw * (1.0 - 0.55 * t)
+                    o = -0.5 * wid
+                    while o <= 0.5 * wid + 1e-3:
+                        _splat(img, zb, x + sa * o, y + ca * o, col, a, ry, W, H)
+                        o += 1.0
+                    a2 = curl * stepl / ln
+                    c2 = ca * math.cos(a2) - sa * math.sin(a2)
+                    sa = sa * math.cos(a2) + ca * math.sin(a2)
+                    ca = c2
+                    x += ca * stepl
+                    y -= sa * stepl
+
+
+@njit(parallel=True, cache=True)
+def to_rgb(rgb, img, W, H, lut):
+    n = lut.shape[0]
     for j in prange(H):
         for i in range(W):
-            f = stk[j, i]                       # fibre noise, roughly -0.6..0.6
-            # crisp per-fibre length: most fibres long, some short
-            fl = 0.55 + f * 2.5
-            if fl < 0.1:
-                fl = 0.1
-            if fl > 1.0:
-                fl = 1.0
-            ln = L * fl
-            acc = 0.0
-            wsum = 0.0
-            for k in range(LIC_N):
-                s_ = ln * k / (LIC_N - 1)
-                x = i + bx * s_
-                y = j + by * s_
-                xi = int(x)
-                yi = int(y)
-                if xi < 0:
-                    xi = 0
-                if yi < 0:
-                    yi = 0
-                if xi > W - 2:
-                    xi = W - 2
-                if yi > H - 2:
-                    yi = H - 2
-                tx = x - xi
-                ty = y - yi
-                if tx < 0.0:
-                    tx = 0.0
-                if ty < 0.0:
-                    ty = 0.0
-                if tx > 1.0:
-                    tx = 1.0
-                if ty > 1.0:
-                    ty = 1.0
-                a0 = tone[yi, xi] + tx * (tone[yi, xi + 1] - tone[yi, xi])
-                a1 = tone[yi + 1, xi] + tx * (tone[yi + 1, xi + 1] - tone[yi + 1, xi])
-                w = 0.35 + 0.65 * k / (LIC_N - 1)   # a fibre carries its root's colour
-                acc += w * (a0 + ty * (a1 - a0))
-                wsum += w
-            streak = acc / wsum
-            base = tone[j, i]
-            # fibre sheen: thin bright/dark lines across the streaks
-            g = f * 3.0
-            if g > 1.0:
-                g = 1.0
-            if g < -1.0:
-                g = -1.0
-            # bright crinkly tops stay crisp; slopes and gaps are combed
-            mix = LIC_MIX * (1.0 - 0.55 * min(max(base, 0.0), 1.0))
-            t = base + mix * (streak - base) + S_W * g
+            t = img[j, i]
             if t < 0.0:
                 t = 0.0
             if t > 1.0:
@@ -378,9 +424,9 @@ def make_lut(n=1024):
         (0.36, (162, 34, 14)),
         (0.52, (204, 74, 30)),
         (0.68, (230, 128, 60)),
-        (0.82, (242, 182, 102)),
-        (0.93, (247, 214, 144)),
-        (1.00, (250, 234, 186)),
+        (0.82, (238, 168, 78)),
+        (0.93, (244, 198, 112)),
+        (1.00, (248, 220, 150)),
     ]
     xs = np.linspace(0, 1, n)
     lut = np.zeros((n, 3), np.float32)
@@ -410,6 +456,8 @@ def main():
     stk = np.zeros((H, W), np.float32)
     smo = np.zeros((H, W), np.float32)
     tone = np.zeros((H, W), np.float32)
+    img = np.zeros((H, W), np.float32)
+    zb = np.zeros((H, W), np.float32)
     rgb = np.zeros((H, W, 3), np.uint8)
     lut = make_lut()
 
@@ -420,7 +468,10 @@ def main():
         warp_field(warp, ww, wh, aspect, phase, a.scale)
         height_field(hgt, stk, smo, warp, W, H, ww, wh, aspect, phase, a.scale)
         shade(tone, hgt, stk, smo, W, H, -0.30, 0.30)
-        fur_pass(rgb, tone, stk, W, H, lut)
+        img[:] = tone * BG_DIM
+        zb[:] = -1e9
+        draw_hairs(img, zb, tone, W, H, aspect, phase, a.scale)
+        to_rgb(rgb, img, W, H, lut)
         if a.out:
             import subprocess
             p = subprocess.run(
