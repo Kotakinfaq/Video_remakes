@@ -23,12 +23,12 @@ WARP_Q = 0.6    # strength of second warp stage
 WARP_B = 0.35   # how much the warp wobbles the clumps
 PERSP = 0.30    # 0 = flat top-down view, higher = more oblique
 PERSP_Y = 2.6 
-WAVE_STRETCH = 0.55  # <1 stretches waves horizontally  # vertical world extent factor (keeps clumps round)
-CLUMP = 1.7     # clump frequency (higher = smaller clumps)
+WAVE_STRETCH = 0.42  # <1 stretches waves horizontally  # vertical world extent factor (keeps clumps round)
+CLUMP = 2.6     # clump frequency (higher = smaller clumps)
 BILLOW = 0.40
 FOLD_F = 2.0    # size of the cauliflower folds relative to clumps   # cauliflower folds on the clumps
 FOAM = 0.20     # fine crinkly detail on the clump tops
-FUR_ANG = 0.30  # hair angle on screen (radians, rising to the right)
+FUR_ANG = 0.38  # hair angle on screen (radians, rising to the right)
 FUR_LEN = 0.010 # how far (screen heights) clump edges smear into hairs
 HAIR_U = 18.0   # hair frequency along the hairs (lower = longer hairs)
 HAIR_V = 260.0   # hair frequency across the hairs (higher = thinner)
@@ -44,18 +44,18 @@ EDGE = 1.0      # crispness of cloud-top edges
 H_W = 0.80      # weight of clump height in colour
 D_W = 0.70      # weight of lighting in colour
 S_W = 0.14      # weight of thin hair lines in colour
-BIAS = -0.11
+BIAS = -0.27
 HAIR_SP = 6.0   # spacing of hair roots in pixels at 4K
 HAIR_LAYERS = 2 # hairs per root cell
-HAIR_LEN = 40.0 # hair length in pixels at 4K (near the bottom of frame)
-HAIR_BEND = 0.9 # how much the hair direction wanders across the frame
-HAIR_JIT = 0.45 # per-hair direction randomness
-HAIR_CURL = 0.5 # per-hair curvature
-HAIR_VAR = 0.12 # per-hair brightness randomness
-HAIR_ROOT = 0.30 # root brightness relative to tip
+HAIR_LEN = 120.0 # hair length in pixels at 4K (near the bottom of frame)
+HAIR_BEND = 0.6 # how much the hair direction wanders across the frame
+HAIR_JIT = 0.12 # per-hair direction randomness
+HAIR_CURL = 0.25 # per-hair curvature
+HAIR_VAR = 0.05 # per-hair brightness randomness
+HAIR_ROOT = 0.55 # root brightness relative to tip
 HAIR_TIP = 0.10 # extra glow at the tip
-HAIR_ALPHA = 0.85
-HAIR_W = 2.5    # hair thickness in pixels at 4K
+HAIR_ALPHA = 0.95
+HAIR_W = 1.4    # hair thickness in pixels at 4K
 BG_DIM = 0.65   # surface brightness showing between hairs
 
 # ---------------------------------------------------------------- noise ----
@@ -424,8 +424,8 @@ def make_lut(n=1024):
         (0.36, (162, 34, 14)),
         (0.52, (204, 74, 30)),
         (0.68, (230, 128, 60)),
-        (0.82, (238, 168, 78)),
-        (0.93, (244, 198, 112)),
+        (0.82, (240, 172, 68)),
+        (0.93, (246, 204, 104)),
         (1.00, (248, 220, 150)),
     ]
     xs = np.linspace(0, 1, n)
