@@ -19,17 +19,23 @@ from numba import njit, prange
 
 
 # ---------------------------------------------------------- look knobs ----
-WARP_Q = 1.4    # strength of second warp stage
-WARP_B = 1.1    # how much the warp bends the main waves
-WARP_S = 0.9    # how much the warp bends the streaks
-STR_U = 11.0    # streak frequency along the flow
-STR_V = 52.0    # streak frequency across the flow
-SHADE_K = 420.0 # relief of the waves
-H_W = 0.80      # weight of wave height in colour
-D_W = 0.40      # weight of lighting in colour
-S_W = 0.26      # weight of streaks in colour
-BIAS = 0.02
-SPEC = 0.30     # glow on the crests facing the light
+WARP_Q = 0.6    # strength of second warp stage
+WARP_B = 0.7    # how much the warp wobbles the clumps
+FUR_ANG = 0.75  # strand angle (radians, rising to the right)
+FUR_BEND = 0.25 # how much the strand direction wanders
+FUR_LEN = 0.30  # how far clump edges are smeared into strands
+HAIR_U = 5.0    # hair frequency along the strands (lower = longer hairs)
+HAIR_V = 70.0   # hair frequency across the strands (higher = thinner)
+CLUMP_U = 3.0   # clump frequency along the strands
+CLUMP_V = 4.5   # clump frequency across the strands
+SHADE_K = 70.0   # relief of strands/clumps
+H_W = 0.95      # weight of clump height in colour
+D_W = 0.28      # weight of lighting in colour
+S_W = 0.12      # weight of hair brightness in colour
+BIAS = 0.03
+PERSP = 0.35
+PERSP_Y = 3.2   # vertical world extent factor (keeps features round)    # 0 = flat top-down view, higher = more oblique
+FOAM = 0.10     # fine crinkly detail on the clump tops
 
 # ---------------------------------------------------------------- noise ----
 
@@ -129,8 +135,12 @@ def warp_field(out, w, h, aspect, phase, scale):
         py = j / (h - 1)
         for i in range(w):
             px = i / (w - 1) * aspect
-            x = px * scale
-            y = py * scale
+            z = 1.0 / (1.0 - PERSP * (1.0 - py))
+            x = (px - 0.5 * aspect) * z * scale
+            y = -z * scale * PERSP_Y
+            # the warp varies more slowly than the clumps it bends
+            x *= 0.45
+            y *= 0.45
             q0 = fbm(x, y, phase, 3, 3, 11, 0.5)
             q1 = fbm(x + 5.2, y + 1.3, phase, 3, 3, 23, 0.5)
             r0 = fbm(x + WARP_Q * q0 + 1.7, y + WARP_Q * q1 + 9.2, phase, 4, 3, 37, 0.5)
@@ -157,23 +167,13 @@ def _bilerp(f, c, fx, fy, w, h):
 
 
 @njit(parallel=True, cache=True)
-def height_field(hgt, stk, warp, W, H, ww, wh, aspect, phase, scale):
-    """Full-resolution height: warped fbm + flowing anisotropic streaks."""
-    # Streak flow: two phase-offset layers advected along the flow and
-    # cross-faded (flow-map technique). Each layer cycles an integer number
-    # of times per loop, so the result stays periodic.
-    cycles = 4.0
-    ph = phase * cycles
-    pa = ph - math.floor(ph)
-    pb = ph + 0.5 - math.floor(ph + 0.5)
-    wa = 1.0 - abs(2.0 * pa - 1.0)       # triangle weights, sum to 1
-    wb = 1.0 - wa
-    wnorm = 1.0 / math.sqrt(wa * wa + wb * wb)
-    flow = 0.35                           # advection distance per cycle
-    # streak direction (slightly downward diagonal like rolling waves)
-    ang = -0.32
-    cd = math.cos(ang)
-    sd = math.sin(ang)
+def height_field(hgt, stk, smo, warp, W, H, ww, wh, aspect, phase, scale):
+    """Full-resolution height of wind-combed fur clumps.
+
+    The clump field is sampled at a position pushed along the strand
+    direction by thin, elongated 'hair' noise. That smears every clump edge
+    into a fringe of fine strands, the combed-fur look.
+    """
     for j in prange(H):
         py = j / (H - 1)
         fy = py * (wh - 1)
@@ -181,31 +181,37 @@ def height_field(hgt, stk, warp, W, H, ww, wh, aspect, phase, scale):
             px = i / (W - 1) * aspect
             fx = i / (W - 1) * (ww - 1)
             q0 = _bilerp(warp, 0, fx, fy, ww, wh)
-            q1 = _bilerp(warp, 1, fx, fy, ww, wh)
             r0 = _bilerp(warp, 2, fx, fy, ww, wh)
             r1 = _bilerp(warp, 3, fx, fy, ww, wh)
-            x = px * scale
-            y = py * scale
-            # main body of the waves
-            b = fbm(x + WARP_B * r0, y + WARP_B * r1, phase, 5, 4, 101, 0.5)
-            # streak coordinates: rotate, bend with the warp, then stretch
-            sx = x + WARP_S * q0
-            sy = y + WARP_S * q1
-            u = cd * sx - sd * sy
-            v = sd * sx + cd * sy
-            # local flow direction follows the warp gradient
-            du = 0.8 + 0.6 * r0
-            ua = u - du * flow * pa
-            ub = u - du * flow * pb
-            sa = fbm(ua * STR_U, v * STR_V, phase, 4, 2, 211, 0.6)
-            sb = fbm(ub * STR_U + 13.7, v * STR_V + 7.1, phase, 4, 2, 211, 0.6)
-            st = (wa * sa + wb * sb) * wnorm
+            # oblique view of a surface: depth grows toward the top of frame
+            z = 1.0 / (1.0 - PERSP * (1.0 - py))
+            x = (px - 0.5 * aspect) * z * scale
+            y = -z * scale * PERSP_Y
+            # strand direction: rising to the right, gently bent by the warp
+            ang = FUR_ANG + FUR_BEND * q0
+            cd = math.cos(ang)
+            sd = -math.sin(ang)          # screen y points down
+            u = x * cd + y * sd          # along the strands
+            v = -x * sd + y * cd         # across the strands
+            # hair noise: long along u, very thin across v
+            h1 = fbm(u * HAIR_U, v * HAIR_V, phase, 3, 2, 211, 0.55)
+            h2 = fbm(u * HAIR_U * 2.1 + 5.3, v * HAIR_V * 2.3 + 1.9, phase, 2, 2, 223, 0.5)
+            hair = h1 + 0.6 * h2
+            # smear the clumps along the strands
+            cu = u + FUR_LEN * hair
+            b = fbm(cu * CLUMP_U + WARP_B * r0, v * CLUMP_V + WARP_B * r1,
+                    phase, 6, 4, 101, 0.56)
+            # crinkly foam detail, also smeared along the strands
+            b += FOAM * fbm(cu * 16.0 + 3.3, v * 16.0 - 7.7, phase, 3, 4, 307, 0.5)
             hgt[j, i] = b
-            stk[j, i] = st
+            stk[j, i] = hair
+            # smooth, un-smeared surface used only for lighting the waves
+            smo[j, i] = fbm(u * CLUMP_U + WARP_B * r0, v * CLUMP_V + WARP_B * r1,
+                            phase, 4, 4, 101, 0.56)
 
 
 @njit(parallel=True, cache=True)
-def shade(rgb, hgt, stk, W, H, lut, lo, hi):
+def shade(rgb, hgt, stk, smo, W, H, lut, lo, hi):
     n = lut.shape[0]
     # light from the upper-left
     lx = -0.5
@@ -213,29 +219,20 @@ def shade(rgb, hgt, stk, W, H, lut, lo, hi):
     lz = 0.5
     strength = SHADE_K * W / 3840.0
     for j in prange(H):
-        jm = j - 2 if j > 1 else 0
-        jp = j + 2 if j < H - 2 else H - 1
+        jm = j - 1 if j > 0 else 0
+        jp = j + 1 if j < H - 1 else H - 1
         for i in range(W):
-            im = i - 2 if i > 1 else 0
-            ip = i + 2 if i < W - 2 else W - 1
-            dx = (hgt[j, ip] - hgt[j, im]) * strength * 0.25
-            dy = (hgt[jp, i] - hgt[jm, i]) * strength * 0.25
+            im = i - 1 if i > 0 else 0
+            ip = i + 1 if i < W - 1 else W - 1
+            dx = (smo[j, ip] - smo[j, im]) * strength * 0.5
+            dy = (smo[jp, i] - smo[jm, i]) * strength * 0.5
             inv = 1.0 / math.sqrt(dx * dx + dy * dy + 1.0)
             diff = (-dx * lx - dy * ly + lz) * inv
             hv = (hgt[j, i] - lo) / (hi - lo)
-            st = stk[j, i]
-            # fur-like streaks: strongest on lit wave faces
-            # ridged strands: thin bright hairs on a darker base
-            rs = 1.0 - abs(st) * 3.2
-            if rs < 0.0:
-                rs = 0.0
-            rs = rs * rs - 0.35
-            spec = diff * diff
-            spec = spec * spec * spec
-            t = (H_W * hv + D_W * (diff - 0.5) + S_W * rs * (0.4 + hv)
-                 + SPEC * spec * hv + BIAS)
-            # push the extremes: darker troughs, hotter crests
-            t = t * t * (3.0 - 2.0 * t) * 0.6 + t * 0.4 if 0.0 < t < 1.0 else t
+            # clump tops are bright, gaps dark; light adds strand relief
+            t = H_W * hv + D_W * (diff - 0.5) + S_W * stk[j, i] * hv + BIAS
+            if 0.0 < t < 1.0:
+                t = t * t * (3.0 - 2.0 * t) * 0.7 + t * 0.3
             if t < 0.0:
                 t = 0.0
             if t > 1.0:
@@ -253,13 +250,13 @@ def shade(rgb, hgt, stk, W, H, lut, lo, hi):
 def make_lut(n=1024):
     # dark ember -> deep red -> orange -> amber -> pale gold
     stops = [
-        (0.00, (18, 2, 0)),
-        (0.18, (70, 8, 1)),
-        (0.38, (150, 34, 4)),
-        (0.58, (214, 92, 16)),
-        (0.76, (240, 154, 52)),
-        (0.90, (252, 206, 112)),
-        (1.00, (255, 238, 176)),
+        (0.00, (38, 4, 0)),
+        (0.20, (88, 12, 3)),
+        (0.42, (184, 58, 13)),
+        (0.62, (224, 104, 30)),
+        (0.80, (246, 176, 78)),
+        (0.93, (250, 212, 120)),
+        (1.00, (253, 232, 160)),
     ]
     xs = np.linspace(0, 1, n)
     lut = np.zeros((n, 3), np.float32)
@@ -276,7 +273,7 @@ def main():
     ap.add_argument("--fps", type=float, default=30000 / 1001)
     ap.add_argument("--seconds", type=float, default=60.0)
     ap.add_argument("--frames", type=str, default="", help="comma list of frame indices (preview)")
-    ap.add_argument("--scale", type=float, default=1.25, help="feature size: bigger = smaller waves")
+    ap.add_argument("--scale", type=float, default=1.6, help="feature size: bigger = smaller waves")
     ap.add_argument("--out", type=str, default="", help="write PNGs to this dir instead of stdout")
     a = ap.parse_args()
 
@@ -287,6 +284,7 @@ def main():
     warp = np.zeros((wh, ww, 4), np.float32)
     hgt = np.zeros((H, W), np.float32)
     stk = np.zeros((H, W), np.float32)
+    smo = np.zeros((H, W), np.float32)
     rgb = np.zeros((H, W, 3), np.uint8)
     lut = make_lut()
 
@@ -295,8 +293,8 @@ def main():
     for f in idx:
         phase = (f % n_frames) / n_frames
         warp_field(warp, ww, wh, aspect, phase, a.scale)
-        height_field(hgt, stk, warp, W, H, ww, wh, aspect, phase, a.scale)
-        shade(rgb, hgt, stk, W, H, lut, -0.5, 0.5)
+        height_field(hgt, stk, smo, warp, W, H, ww, wh, aspect, phase, a.scale)
+        shade(rgb, hgt, stk, smo, W, H, lut, -0.30, 0.30)
         if a.out:
             import subprocess
             p = subprocess.run(
