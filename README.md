@@ -24,3 +24,18 @@ ffmpeg -stream_loop 5 -i loop60.mp4 -c copy -movflags +faststart lava_6min.mp4
 ```
 
 Look knobs (colour weights, streak size, relief) are constants at the top of the script.
+
+## `lyric_captions.py`: lyric captions in the black-box style
+
+Burns centred captions onto a video: bold uppercase white text (Inter
+ExtraBold) on a solid black box, with hard cuts between lines. Sizes scale with
+the frame height, so the same captions file works at 1080p and 4K.
+
+Requirements: Python 3, `Pillow`, `ffmpeg`.
+
+Captions file: one caption per line as `START END TEXT` (seconds); see
+`captions/tanah_airku_8s.txt`.
+
+```bash
+python3 lyric_captions.py input.mp4 captions/tanah_airku_8s.txt output.mp4
+```

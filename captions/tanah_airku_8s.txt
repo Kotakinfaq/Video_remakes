@@ -1,0 +1,5 @@
+# START END TEXT (seconds). Opening lines only; the clip is 8 s with no audio.
+0.0 2.0 Tanah airku
+2.0 4.0 Tidak kulupakan
+4.0 6.0 Kan terkenang
+6.0 8.0 Selama hidupku
