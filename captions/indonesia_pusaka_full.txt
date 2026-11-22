@@ -1,0 +1,42 @@
+# START END TEXT (seconds). Full song, evenly paced (no audio to sync to).
+# 3 s per chunk, 4 s for each stanza's last chunk, 2 s gap between stanzas.
+1.0 4.0 Indonesia
+4.0 7.0 Tanah air beta
+7.0 10.0 Pusaka abadi
+10.0 13.0 Nan jaya
+13.0 16.0 Indonesia
+16.0 19.0 Sejak dulu kala
+19.0 22.0 Selalu dipuja-puja
+22.0 26.0 Bangsa
+
+28.0 31.0 Di sana
+31.0 34.0 Tempat lahir beta
+34.0 37.0 Dibuai
+37.0 40.0 Dibesarkan bunda
+40.0 43.0 Tempat berlindung
+43.0 46.0 Di hari tua
+46.0 49.0 Tempat akhir
+49.0 53.0 Menutup mata
+
+55.0 58.0 Sungguh indah
+58.0 61.0 Tanah air beta
+61.0 64.0 Tiada bandingnya
+64.0 67.0 Di dunia
+67.0 70.0 Karya indah
+70.0 73.0 Tuhan Maha Kuasa
+73.0 76.0 Bagi bangsa
+76.0 80.0 Yang memuja-Nya
+
+82.0 85.0 Indonesia
+85.0 88.0 Ibu pertiwi
+88.0 91.0 Kau kupuja
+91.0 94.0 Kau kukasihi
+94.0 97.0 Tenagaku
+97.0 100.0 Bahkan pun jiwaku
+100.0 103.0 Kepadamu
+103.0 106.0 Rela kuberi
+106.0 109.0 Tenagaku
+109.0 112.0 Bahkan pun jiwaku
+112.0 115.0 Kepadamu
+115.0 119.0 Rela kuberi
+# ends at 119.0; render with --duration 121
