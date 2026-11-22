@@ -14,6 +14,10 @@ Blank lines and lines starting with # are ignored.
 
 Usage:
     python3 lyric_captions.py input.mp4 captions.txt output.mp4
+    python3 lyric_captions.py loop.mp4 captions.txt output.mp4 --duration 73
+
+--duration loops the input video until the output is that many seconds long
+(use a seamless loop as input, see make_loop.sh).
 """
 import argparse
 import json
@@ -106,6 +110,8 @@ def main():
     ap.add_argument("input")
     ap.add_argument("captions")
     ap.add_argument("output")
+    ap.add_argument("--duration", type=float,
+                    help="loop the input video to this many seconds")
     ap.add_argument("--crf", type=int, default=16)
     ap.add_argument("--preset", default="medium")
     args = ap.parse_args()
@@ -116,7 +122,10 @@ def main():
     w, h = probe(args.input)
 
     with tempfile.TemporaryDirectory() as tmp:
-        cmd = ["ffmpeg", "-y", "-v", "error", "-i", args.input]
+        cmd = ["ffmpeg", "-y", "-v", "error"]
+        if args.duration:
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-i", args.input]
         for i, (_, _, text) in enumerate(caps):
             p = os.path.join(tmp, f"cap{i:03d}.png")
             render_caption(text, w, h, p)
@@ -131,7 +140,10 @@ def main():
         cmd += ["-filter_complex", ";".join(chain), "-map", f"[{last}]",
                 "-map", "0:a?", "-c:a", "copy",
                 "-c:v", "libx264", "-preset", args.preset, "-crf", str(args.crf),
-                "-pix_fmt", "yuv420p", "-movflags", "+faststart", args.output]
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart"]
+        if args.duration:
+            cmd += ["-t", str(args.duration)]
+        cmd.append(args.output)
         subprocess.run(cmd, check=True)
 
 

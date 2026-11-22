@@ -1,0 +1,26 @@
+# START END TEXT (seconds). Full song, evenly paced (no audio to sync to).
+# 3 s per chunk, 4 s for each verse's last line, 2 s gap between verses.
+1.0 4.0 Tanah airku
+4.0 7.0 Tidak kulupakan
+7.0 10.0 Kan terkenang
+10.0 13.0 Selama hidupku
+13.0 16.0 Biarpun saya
+16.0 19.0 Pergi jauh
+19.0 22.0 Tidak kan hilang
+22.0 25.0 Dari kalbu
+25.0 28.0 Tanahku
+28.0 31.0 Yang kucintai
+31.0 35.0 Engkau kuhargai
+
+37.0 40.0 Walaupun banyak
+40.0 43.0 Negeri kujalani
+43.0 46.0 Yang masyhur permai
+46.0 49.0 Di kata orang
+49.0 52.0 Tetapi kampung
+52.0 55.0 Dan rumahku
+55.0 58.0 Di sanalah
+58.0 61.0 Kurasa senang
+61.0 64.0 Tanahku
+64.0 67.0 Tak kulupakan
+67.0 71.0 Engkau kubanggakan
+# ends at 71.0; render with --duration 73

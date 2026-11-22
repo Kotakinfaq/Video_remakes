@@ -39,3 +39,11 @@ Captions file: one caption per line as `START END TEXT` (seconds); see
 ```bash
 python3 lyric_captions.py input.mp4 captions/tanah_airku_8s.txt output.mp4
 ```
+
+For a song longer than the clip, make the clip a seamless loop first, then
+loop it to the song's length with `--duration`:
+
+```bash
+./make_loop.sh input.mp4 loop.mp4        # crossfades last 2 s into first 2 s
+python3 lyric_captions.py loop.mp4 captions/tanah_airku_full.txt full.mp4 --duration 73
+```
